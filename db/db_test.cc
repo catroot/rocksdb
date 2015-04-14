@@ -9613,6 +9613,7 @@ TEST_F(DBTest, FIFOCompactionTest) {
         ASSERT_OK(Put(ToString(i * 100 + j), RandomString(&rnd, 1024)));
       }
       // flush should happen here
+      ASSERT_OK(dbfull()->TEST_WaitForFlushMemTable());
     }
     if (iter == 0) {
       ASSERT_OK(dbfull()->TEST_WaitForCompact());
@@ -9934,7 +9935,8 @@ namespace {
   }
 }  // namespace
 
-TEST_F(DBTest, CompactFilesOnLevelCompaction) {
+// TODO t6534343 -- Don't run two level 0 CompactFiles concurrently
+TEST_F(DBTest, DISABLED_CompactFilesOnLevelCompaction) {
   const int kTestKeySize = 16;
   const int kTestValueSize = 984;
   const int kEntrySize = kTestKeySize + kTestValueSize;
@@ -11085,6 +11087,45 @@ TEST_F(DBTest, DynamicLevelMaxBytesBase2) {
   ASSERT_TRUE(db_->GetIntProperty("rocksdb.base-level", &int_prop));
   ASSERT_EQ(1U, int_prop);
 }
+
+TEST_F(DBTest, DynamicLevelMaxBytesBaseInc) {
+  Options options = CurrentOptions();
+  options.create_if_missing = true;
+  options.db_write_buffer_size = 2048;
+  options.write_buffer_size = 2048;
+  options.max_write_buffer_number = 2;
+  options.level0_file_num_compaction_trigger = 2;
+  options.level0_slowdown_writes_trigger = 2;
+  options.level0_stop_writes_trigger = 2;
+  options.target_file_size_base = 2048;
+  options.level_compaction_dynamic_level_bytes = true;
+  options.max_bytes_for_level_base = 10240;
+  options.max_bytes_for_level_multiplier = 4;
+  options.hard_rate_limit = 1.1;
+  options.max_background_compactions = 2;
+  options.num_levels = 5;
+
+  DestroyAndReopen(options);
+
+  int non_trivial = 0;
+  rocksdb::SyncPoint::GetInstance()->SetCallBack(
+      "DBImpl::BackgroundCompaction:NonTrivial", [&]() { non_trivial++; });
+  rocksdb::SyncPoint::GetInstance()->EnableProcessing();
+
+  Random rnd(301);
+  for (int i = 0; i < 3000; i++) {
+    ASSERT_OK(Put(Key(i), RandomString(&rnd, 102)));
+  }
+  Flush();
+  dbfull()->TEST_WaitForCompact();
+  rocksdb::SyncPoint::GetInstance()->DisableProcessing();
+
+  ASSERT_EQ(non_trivial, 0);
+
+  env_->SetBackgroundThreads(1, Env::LOW);
+  env_->SetBackgroundThreads(1, Env::HIGH);
+}
+
 
 TEST_F(DBTest, DynamicLevelCompressionPerLevel) {
   if (!Snappy_Supported()) {
@@ -12418,6 +12459,7 @@ TEST_F(DBTest, CompressLevelCompaction) {
 }  // namespace rocksdb
 
 int main(int argc, char** argv) {
+  rocksdb::port::InstallStackTraceHandler();
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }

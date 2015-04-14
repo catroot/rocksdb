@@ -232,7 +232,7 @@ DBImpl::DBImpl(const DBOptions& options, const std::string& dbname)
       last_stats_dump_time_microsec_(0),
       next_job_id_(1),
       flush_on_destroy_(false),
-      env_options_(options),
+      env_options_(db_options_),
 #ifndef ROCKSDB_LITE
       wal_manager_(db_options_, env_options_),
 #endif  // ROCKSDB_LITE
@@ -430,6 +430,7 @@ void DBImpl::MaybeDumpStats() {
     // period in rare cases.
     last_stats_dump_time_microsec_ = now_micros;
 
+#ifndef ROCKSDB_LITE
     bool tmp1 = false;
     bool tmp2 = false;
     DBPropertyType cf_property_type =
@@ -452,6 +453,7 @@ void DBImpl::MaybeDumpStats() {
         db_options_.info_log, "------- DUMPING STATS -------");
     Log(InfoLogLevel::INFO_LEVEL,
         db_options_.info_log, "%s", stats.c_str());
+#endif  // !ROCKSDB_LITE
 
     PrintStatistics();
   }
@@ -1397,7 +1399,7 @@ Status DBImpl::CompactFilesImpl(
     return s;
   }
 
-  autovector<CompactionInputFiles> input_files;
+  std::vector<CompactionInputFiles> input_files;
   s = cfd->compaction_picker()->GetCompactionInputsFromFileNumbers(
       &input_files, &input_set, version->storage_info(), compact_options);
   if (!s.ok()) {
@@ -1418,12 +1420,10 @@ Status DBImpl::CompactFilesImpl(
   unique_ptr<Compaction> c;
   assert(cfd->compaction_picker());
   c.reset(cfd->compaction_picker()->FormCompaction(
-        compact_options, input_files,
-        output_level, version->storage_info(),
-        *cfd->GetLatestMutableCFOptions()));
+      compact_options, input_files, output_level, version->storage_info(),
+      *cfd->GetLatestMutableCFOptions(), output_path_id));
   assert(c);
   c->SetInputVersion(version);
-  c->SetOutputPathId(static_cast<uint32_t>(output_path_id));
   // deletion compaction currently not allowed in CompactFiles.
   assert(!c->IsDeletionCompaction());
 

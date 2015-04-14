@@ -112,8 +112,8 @@ endif
 
 ifndef DISABLE_JEMALLOC
 	EXEC_LDFLAGS := $(JEMALLOC_LIB) $(EXEC_LDFLAGS)
-	PLATFORM_CXXFLAGS += $(JEMALLOC_INCLUDE) -DHAVE_JEMALLOC
-	PLATFORM_CCFLAGS += $(JEMALLOC_INCLUDE) -DHAVE_JEMALLOC
+	PLATFORM_CXXFLAGS += $(JEMALLOC_INCLUDE)
+	PLATFORM_CCFLAGS += $(JEMALLOC_INCLUDE)
 endif
 
 export GTEST_THROW_ON_FAILURE=1 GTEST_HAS_EXCEPTIONS=1
@@ -141,8 +141,8 @@ install:
 	for header in `find "include/rocksdb" -type f -name *.h`; do \
 		install -C -m 644 $$header $(INSTALL_PATH)/$$header; \
 	done
-	[ ! -e $(LIBRARY) ] || install -C -m 644 $(LIBRARY) $(INSTALL_PATH)/lib
-	[ ! -e $(SHARED) ] || install -C -m 644 $(SHARED) $(INSTALL_PATH)/lib
+	[ ! -e $(LIBRARY) ] || install -C -m 755 $(LIBRARY) $(INSTALL_PATH)/lib
+	[ -n '$(SHARED)' ] && install -C -m 755 $(SHARED) $(INSTALL_PATH)/lib
 #-------------------------------------------------
 
 WARNING_FLAGS = -W -Wextra -Wall -Wsign-compare -Wshadow \
@@ -188,7 +188,6 @@ MOCKOBJECTS = $(MOCK_SOURCES:.cc=.o)
 GTEST = $(GTEST_DIR)/gtest/gtest-all.o
 TESTUTIL = ./util/testutil.o
 TESTHARNESS = ./util/testharness.o $(TESTUTIL) $(MOCKOBJECTS) $(GTEST)
-BENCHHARNESS = ./util/benchharness.o
 VALGRIND_ERROR = 2
 VALGRIND_DIR = build_tools/VALGRIND_LOGS
 VALGRIND_VER := $(join $(VALGRIND_VER),valgrind)
@@ -204,7 +203,6 @@ TESTS = \
 	table_properties_collector_test \
 	arena_test \
 	auto_roll_logger_test \
-	benchharness_test \
 	block_test \
 	bloom_test \
 	dynamic_bloom_test \
@@ -226,6 +224,7 @@ TESTS = \
 	manual_compaction_test \
 	memenv_test \
 	mock_env_test \
+	memtable_list_test \
 	merge_test \
 	merger_test \
 	redis_test \
@@ -246,6 +245,7 @@ TESTS = \
 	version_builder_test \
 	file_indexer_test \
 	write_batch_test \
+	write_batch_with_index_test \
 	write_controller_test\
 	deletefile_test \
 	table_test \
@@ -275,7 +275,7 @@ TOOLS = \
 	ldb \
 	db_repl_stress
 
-BENCHMARKS = db_bench table_reader_bench log_and_apply_bench cache_bench memtablerep_bench
+BENCHMARKS = db_bench table_reader_bench cache_bench memtablerep_bench
 
 # The library name is configurable since we are maintaining libraries of both
 # debug/release mode.
@@ -319,7 +319,7 @@ $(SHARED3): $(SHARED4)
 endif
 
 $(SHARED4):
-	$(CXX) $(PLATFORM_SHARED_LDFLAGS)$(SHARED2) $(CXXFLAGS) $(PLATFORM_SHARED_CFLAGS) $(LIB_SOURCES) $(LDFLAGS) -o $@
+	$(CXX) $(PLATFORM_SHARED_LDFLAGS)$(SHARED3) $(CXXFLAGS) $(PLATFORM_SHARED_CFLAGS) $(LIB_SOURCES) $(LDFLAGS) -o $@
 
 endif  # PLATFORM_SHARED_EXT
 
@@ -442,6 +442,9 @@ prioritize_long_running_tests =						\
 # See "man parallel" for its "-j ..." option.
 J = 100%
 
+# Use this regexp to select the subset of tests whose names match.
+tests-regexp = .
+
 .PHONY: check_0
 check_0: $(t_run)
 	$(AM_V_GEN)export TEST_TMPDIR=$(TMPD);				\
@@ -454,6 +457,7 @@ check_0: $(t_run)
 	  printf '%s\n' $(t_run);					\
 	}								\
 	  | $(prioritize_long_running_tests)				\
+	  | grep -E '$(tests-regexp)'					\
 	  | parallel -j$(J) --joblog=LOG $$eta --gnu '{} >& t/log-{/}'
 endif
 
@@ -618,9 +622,6 @@ stringappend_test: utilities/merge_operators/string_append/stringappend_test.o $
 redis_test: utilities/redis/redis_lists_test.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(AM_LINK)
 
-benchharness_test: util/benchharness_test.o $(LIBOBJECTS) $(TESTHARNESS) $(BENCHHARNESS)
-	$(AM_LINK)
-
 histogram_test: util/histogram_test.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(AM_LINK)
 
@@ -653,9 +654,6 @@ comparator_db_test: db/comparator_db_test.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(AM_LINK)
 
 table_reader_bench: table/table_reader_bench.o $(LIBOBJECTS) $(TESTHARNESS)
-	$(AM_LINK) $(pg)
-
-log_and_apply_bench: db/log_and_apply_bench.o $(LIBOBJECTS) $(TESTHARNESS) $(BENCHHARNESS)
 	$(AM_LINK) $(pg)
 
 perf_context_test: db/perf_context_test.o $(LIBOBJECTS) $(TESTHARNESS)
@@ -763,7 +761,7 @@ geodb_test: utilities/geodb/geodb_test.o $(LIBOBJECTS) $(TESTHARNESS)
 cuckoo_table_builder_test: table/cuckoo_table_builder_test.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(AM_LINK)
 
-cuckoo_table_reader_test: table/cuckoo_table_reader_test.o $(LIBOBJECTS) $(TESTHARNESS) $(BENCHHARNESS)
+cuckoo_table_reader_test: table/cuckoo_table_reader_test.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(AM_LINK)
 
 cuckoo_table_db_test: db/cuckoo_table_db_test.o $(LIBOBJECTS) $(TESTHARNESS)
@@ -805,6 +803,9 @@ filelock_test: util/filelock_test.o $(LIBOBJECTS) $(TESTHARNESS)
 auto_roll_logger_test: util/auto_roll_logger_test.o $(LIBOBJECTS) $(TESTHARNESS)
 	$(AM_LINK)
 
+memtable_list_test: db/memtable_list_test.o $(LIBOBJECTS) $(TESTHARNESS)
+	$(AM_LINK)
+
 sst_dump: tools/sst_dump.o $(LIBOBJECTS)
 	$(AM_LINK)
 
@@ -815,7 +816,6 @@ ldb: tools/ldb.o $(LIBOBJECTS)
 # Jni stuff
 # ---------------------------------------------------------------------------
 
-JNI_NATIVE_SOURCES = ./java/rocksjni/*.cc
 JAVA_INCLUDE = -I$(JAVA_HOME)/include/ -I$(JAVA_HOME)/include/linux
 ARCH := $(shell getconf LONG_BIT)
 ROCKSDBJNILIB = librocksdbjni-linux$(ARCH).so
@@ -864,12 +864,21 @@ liblz4.a:
 	   cd lz4-r127/lib && make CFLAGS='-fPIC' all
 	   cp lz4-r127/lib/liblz4.a .
 
+# A version of each $(LIBOBJECTS) compiled with -fPIC
+java_libobjects = $(patsubst %,jl/%,$(LIBOBJECTS))
+CLEAN_FILES += jl
 
-rocksdbjavastatic: libz.a libbz2.a libsnappy.a liblz4.a
-	OPT="-fPIC -DNDEBUG -O2" $(MAKE) $(LIBRARY) -j
+$(java_libobjects): jl/%.o: %.cc
+	$(AM_V_CC)mkdir -p $(@D)
+	@$(CXX) $(CXXFLAGS) -fPIC -c $< -o $@ $(COVERAGEFLAGS)
+
+rocksdbjavastatic: $(java_libobjects) libz.a libbz2.a libsnappy.a liblz4.a
 	cd java;$(MAKE) javalib;
 	rm -f ./java/target/$(ROCKSDBJNILIB)
-	$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC -o ./java/target/$(ROCKSDBJNILIB) $(JNI_NATIVE_SOURCES) $(LIBOBJECTS) $(COVERAGEFLAGS) libz.a libbz2.a libsnappy.a liblz4.a
+	$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC \
+	  -o ./java/target/$(ROCKSDBJNILIB) $(JNI_NATIVE_SOURCES) \
+	  $(java_libobjects) $(COVERAGEFLAGS) \
+	  libz.a libbz2.a libsnappy.a liblz4.a
 	cd java/target;strip -S -x $(ROCKSDBJNILIB)
 	cd java;jar -cf target/$(ROCKSDB_JAR) HISTORY*.md
 	cd java/target;jar -uf $(ROCKSDB_JAR) $(ROCKSDBJNILIB)
@@ -891,11 +900,10 @@ rocksdbjavastaticpublish: rocksdbjavastaticrelease
 	mvn gpg:sign-and-deploy-file -Durl=https://oss.sonatype.org/service/local/staging/deploy/maven2/ -DrepositoryId=sonatype-nexus-staging -DpomFile=java/rocksjni.pom -Dfile=java/target/rocksdbjni-$(ROCKSDB_MAJOR).$(ROCKSDB_MINOR).$(ROCKSDB_PATCH)-osx.jar -Dclassifier=osx
 	mvn gpg:sign-and-deploy-file -Durl=https://oss.sonatype.org/service/local/staging/deploy/maven2/ -DrepositoryId=sonatype-nexus-staging -DpomFile=java/rocksjni.pom -Dfile=java/target/rocksdbjni-$(ROCKSDB_MAJOR).$(ROCKSDB_MINOR).$(ROCKSDB_PATCH).jar
 
-rocksdbjava:
-	OPT="-fPIC -DNDEBUG -O2" $(MAKE) $(LIBRARY) -j32
+rocksdbjava: $(java_libobjects)
 	cd java;$(MAKE) javalib;
 	rm -f ./java/target/$(ROCKSDBJNILIB)
-	$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC -o ./java/target/$(ROCKSDBJNILIB) $(JNI_NATIVE_SOURCES) $(LIBOBJECTS) $(JAVA_LDFLAGS) $(COVERAGEFLAGS)
+	$(CXX) $(CXXFLAGS) -I./java/. $(JAVA_INCLUDE) -shared -fPIC -o ./java/target/$(ROCKSDBJNILIB) $(JNI_NATIVE_SOURCES) $(java_libobjects) $(JAVA_LDFLAGS) $(COVERAGEFLAGS)
 	cd java;jar -cf target/$(ROCKSDB_JAR) HISTORY*.md
 	cd java/target;jar -uf $(ROCKSDB_JAR) $(ROCKSDBJNILIB)
 	cd java/target/classes;jar -uf ../$(ROCKSDB_JAR) org/rocksdb/*.class org/rocksdb/util/*.class
@@ -913,7 +921,14 @@ commit-prereq:
 	$(MAKE) clean && $(MAKE) all check;
 	$(MAKE) clean && $(MAKE) rocksdbjava;
 	$(MAKE) clean && USE_CLANG=1 $(MAKE) all;
-	$(MAKE) clean && OPT=-DROCKSDB_LITE $(MAKE) release;
+	$(MAKE) clean && OPT=-DROCKSDB_LITE $(MAKE) static_lib;
+
+xfunc:
+	for xftest in $(XFUNC_TESTS); do \
+		echo "===== Running xftest $$xftest"; \
+		make check ROCKSDB_XFUNC_TEST="$$xftest" tests-regexp="DBTest" ;\
+	done
+
 
 # ---------------------------------------------------------------------------
 #  	Platform-specific compilation
